@@ -10,7 +10,6 @@ import platform
 import subprocess
 from urllib.parse import scheme_chars
 from ipaddress import IPv4Address, ip_address
-from distutils.version import LooseVersion
 from pathlib import Path
 from stat import S_IXUSR
 
@@ -535,7 +534,7 @@ def check_dep():
     if implementation != 'CPython':
         logger.log('FATAL', f'OneForAll only passed the test under CPython')
         exit(1)
-    if LooseVersion(version) < LooseVersion('3.6'):
+    if tuple(int(x) for x in version.split('.')[:3]) < (3, 6):
         logger.log('FATAL', 'OneForAll requires Python 3.6 or higher')
         exit(1)
 
@@ -589,21 +588,32 @@ def call_massdns(massdns_path, dict_path, ns_path, output_path, log_path,
                  query_type='A', process_num=1, concurrent_num=10000,
                  quiet_mode=False):
     logger.log('DEBUG', 'Start running massdns')
-    quiet = ''
+    cmd = [str(massdns_path)]
     if quiet_mode:
-        quiet = '--quiet'
+        cmd.append('--quiet')
     status_format = settings.brute_status_format
     socket_num = settings.brute_socket_num
     resolve_num = settings.brute_resolve_num
-    cmd = f'{massdns_path} {quiet} --status-format {status_format} ' \
-          f'--processes {process_num} --socket-count {socket_num} ' \
-          f'--hashmap-size {concurrent_num} --resolvers {ns_path} ' \
-          f'--resolve-count {resolve_num} --type {query_type} ' \
-          f'--flush --output J --outfile {output_path} ' \
-          f'--root --error-log {log_path} {dict_path} --filter OK ' \
-          f'--sndbuf 0 --rcvbuf 0'
+    cmd += [
+        '--status-format', str(status_format),
+        '--processes', str(process_num),
+        '--socket-count', str(socket_num),
+        '--hashmap-size', str(concurrent_num),
+        '--resolvers', str(ns_path),
+        '--resolve-count', str(resolve_num),
+        '--type', str(query_type),
+        '--flush', '--output', 'J', '--outfile', str(output_path),
+        '--root', '--error-log', str(log_path),
+        str(dict_path), '--filter', 'OK',
+        '--sndbuf', '0', '--rcvbuf', '0',
+    ]
     logger.log('DEBUG', f'Run command {cmd}')
-    subprocess.run(args=cmd, shell=True)
+    subprocess.run(cmd)
+    # massdns 未能生成输出文件时（如二进制无法执行）兜底为空结果，避免下游崩溃
+    if not Path(output_path).exists():
+        logger.log('ALERT', f'massdns did not produce {output_path}, '
+                            f'treat brute result as empty')
+        Path(output_path).touch()
     logger.log('DEBUG', f'Finished massdns')
 
 
